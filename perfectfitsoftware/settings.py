@@ -102,25 +102,37 @@ WSGI_APPLICATION = 'perfectfitsoftware.wsgi.application'
 
 # ── Database ──────────────────────────────────────────────────────────────────
 
+import dj_database_url
 
 DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.postgresql",
-        "NAME": os.getenv("DB_NAME"),
-        "USER": os.getenv("DB_USER"),
-        "PASSWORD": os.getenv("DB_PASSWORD"),
-        "HOST": os.getenv("DB_HOST"),
-        "PORT": os.getenv("DB_PORT", "5432"),
-        # "OPTIONS": {
-        #     "sslmode": "require",
-        # }
-    }
+    "default": dj_database_url.config(
+        default=os.getenv("DATABASE_URL"),
+        conn_max_age=600,
+    )
 }
+if not DATABASES["default"].get("HOST"):
+    raise RuntimeError(
+        "DATABASE_URL is missing or invalid. Check your .env file."
+    )
 
-print("DB_NAME:", os.getenv("DB_NAME"))
-print("DB_HOST:", os.getenv("DB_HOST"))
-print("DB_USER:", os.getenv("DB_USER"))
-print("DB_PASSWORD loaded:", bool(os.getenv("DB_PASSWORD")))
+# DATABASES = {
+#     "default": {
+#         "ENGINE": "django.db.backends.postgresql",
+#         "NAME": os.getenv("DB_NAME"),
+#         "USER": os.getenv("DB_USER"),
+#         "PASSWORD": os.getenv("DB_PASSWORD"),
+#         "HOST": os.getenv("DB_HOST"),
+#         "PORT": os.getenv("DB_PORT", "5432"),
+#         # "OPTIONS": {
+#         #     "sslmode": "require",
+#         # }
+#     }
+# }
+
+# print("DB_NAME:", os.getenv("DB_NAME"))
+# print("DB_HOST:", os.getenv("DB_HOST"))
+# print("DB_USER:", os.getenv("DB_USER"))
+# print("DB_PASSWORD loaded:", bool(os.getenv("DB_PASSWORD")))
 
 # ── Media files (local storage — works offline on client machine) ─────────────
 MEDIA_URL = '/media/'
