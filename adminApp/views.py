@@ -121,70 +121,199 @@ def create_rental_item(request):
         "code": item.code,
         "image_url": item.image.url if item.image else None
     })
+from django.http import JsonResponse
+from django.db.models import Count, Q
 
-#  GET ALL
+from .models import Product, RentalBooking, Alteration
+
+
 def get_all_rental_items(request):
-    if request.method == "GET":
-        from .models import RentalBooking, Alteration
-        items = Product.objects.all()
+
+    if request.method != "GET":
+        return JsonResponse(
+            {"error": "GET method required"},
+            status=405
+        )
+
+    try:
+        items = (
+            Product.objects
+            .select_related("category")
+            .prefetch_related("units")
+            .annotate(
+                times_sold=Count(
+                    "rentalitem__booking",
+                    filter=Q(
+                        rentalitem__booking__status="COMPLETED"
+                    ),
+                    distinct=True
+                )
+            )
+        )
 
         data = []
+
         for item in items:
+
+            sizes = list(
+                item.units.values_list(
+                    "size",
+                    flat=True
+                ).distinct()
+            )
+
             data.append({
                 "id": item.id,
                 "code": item.code,
                 "name": item.name,
+
                 "category": item.category.name,
                 "category_id": item.category.id,
-                "size": ", ".join(set(item.units.values_list("size", flat=True))),
+
+                "size": ", ".join(
+                    str(size) for size in sizes if size
+                ),
+
                 "colour": item.colour,
                 "description": item.description,
+
                 "rental_price": float(item.rental_price),
+
                 "total_stock": item.total_stock,
                 "available_stock": item.available_stock,
-                "condition": "ready" if item.is_available else "out_of_stock",
+
+                "condition": (
+                    "ready"
+                    if item.is_available
+                    else "out_of_stock"
+                ),
+
                 "is_available": item.is_available,
-                "times_rented": item.total_rented_times,
-                "image_url": item.image.url if item.image else None,
-                "has_rented": item.units.filter(status='rented').exists(),
-                "has_prebooked": RentalBooking.objects.filter(items__product=item, status='PRE_BOOKED').exists(),
-                "has_returned": RentalBooking.objects.filter(items__product=item, status='RETURNED').exists(),
-                "has_alteration": Alteration.objects.filter(product=item, status__in=['PENDING', 'IN_PROGRESS']).exists(),
+
+                # Count distinct completed bookings,
+                # not individual physical units.
+                "times_sold": item.times_sold,
+
+                "image_url": (
+                    item.image.url
+                    if item.image
+                    else None
+                ),
+
+                "has_rented": item.units.filter(
+                    status="rented"
+                ).exists(),
+
+                "has_prebooked": RentalBooking.objects.filter(
+                    items__product=item,
+                    status="PRE_BOOKED"
+                ).exists(),
+
+                "has_returned": RentalBooking.objects.filter(
+                    items__product=item,
+                    status="RETURNED"
+                ).exists(),
+
+                "has_alteration": Alteration.objects.filter(
+                    product=item,
+                    status__in=[
+                        "PENDING",
+                        "IN_PROGRESS"
+                    ]
+                ).exists(),
             })
 
         return JsonResponse(data, safe=False)
 
-# GET SINGLE ITEM
+    except Exception as e:
+        return JsonResponse(
+            {"error": str(e)},
+            status=500
+        )
+
+
 def get_rental_item(request, item_id):
+
+    if request.method != "GET":
+        return JsonResponse(
+            {"error": "GET method required"},
+            status=405
+        )
+
     try:
-        item = Product.objects.get(id=item_id)
+        item = Product.objects.select_related(
+            "category"
+        ).get(id=item_id)
+
     except Product.DoesNotExist:
-        return JsonResponse({"error": "Item not found"}, status=404)
+        return JsonResponse(
+            {"error": "Item not found"},
+            status=404
+        )
 
-    data = {
-        "id": item.id,
-        "code": item.code,
-        "name": item.name,
-        "category": item.category.name,
-        "category_id": item.category.id,
-        "size": ", ".join(set(item.units.values_list("size", flat=True))),
-        "colour": item.colour,
-        "description": item.description,
-        "rental_price": float(item.rental_price),
-        "total_stock": item.total_stock,
-        "available_stock": item.available_stock,
-        "condition": "ready" if item.is_available else "out_of_stock",
-        "is_available": item.is_available,
-        "times_rented": item.total_rented_times,
-        "image_url": item.image.url if item.image else None  #  added
-    }
+    try:
+        times_sold = RentalBooking.objects.filter(
+            items__product=item,
+            status="COMPLETED"
+        ).values("id").distinct().count()
 
-    return JsonResponse(data)
+        sizes = list(
+            item.units.values_list(
+                "size",
+                flat=True
+            ).distinct()
+        )
+
+        data = {
+            "id": item.id,
+            "code": item.code,
+            "name": item.name,
+
+            "category": item.category.name,
+            "category_id": item.category.id,
+
+            "size": ", ".join(
+                str(size) for size in sizes if size
+            ),
+
+            "colour": item.colour,
+            "description": item.description,
+
+            "rental_price": float(item.rental_price),
+
+            "total_stock": item.total_stock,
+            "available_stock": item.available_stock,
+
+            "condition": (
+                "ready"
+                if item.is_available
+                else "out_of_stock"
+            ),
+
+            "is_available": item.is_available,
+
+            "times_sold": times_sold,
+
+            "image_url": (
+                item.image.url
+                if item.image
+                else None
+            ),
+        }
+
+        return JsonResponse(data)
+
+    except Exception as e:
+        return JsonResponse(
+            {"error": str(e)},
+            status=500
+        )
 
 #  UPDATE
 from .models import Product, Category
 from django.http import JsonResponse
 import json
+
 
 
 @csrf_exempt
@@ -197,7 +326,13 @@ def update_rental_item(request, item_id):
 
     # Handle both JSON & form-data
     if request.content_type == "application/json":
-        data = json.loads(request.body)
+        try:
+            data = json.loads(request.body)
+        except json.JSONDecodeError:
+            return JsonResponse(
+                {"error": "Invalid JSON data"},
+                status=400
+            )
         image = None
     else:
         data = request.POST
@@ -223,7 +358,6 @@ def update_rental_item(request, item_id):
         item.rental_price
     )
 
-    # Update image if provided
     if image:
         item.image = image
 
@@ -241,123 +375,78 @@ def update_rental_item(request, item_id):
             )
 
     # --------------------------------------------------
-    # UPDATE STOCK QUANTITY
+    # UPDATE STOCK - ONLY CHANGED LOGIC
     # --------------------------------------------------
 
-    if "total_stock" in data:
+    if "add_stock" in data:
 
         try:
-            requested_stock = int(data.get("total_stock"))
+            quantity_to_add = int(data.get("add_stock"))
         except (TypeError, ValueError):
             return JsonResponse(
                 {"error": "Invalid stock quantity"},
                 status=400
             )
 
-        if requested_stock < 0:
+        if quantity_to_add < 0:
             return JsonResponse(
                 {"error": "Stock quantity cannot be negative"},
                 status=400
             )
 
-        units = PhysicalUnit.objects.filter(
-            product=item
-        )
+        units = PhysicalUnit.objects.filter(product=item)
 
-        current_stock = units.count()
-
-        # Units that cannot be removed automatically
-        unavailable_units = units.exclude(
+        current_available = units.filter(
             status="available"
-        )
+        ).count()
 
-        unavailable_count = unavailable_units.count()
+        # When no stock is available, start a fresh stock baseline.
+        if current_available == 0:
 
-        # We cannot reduce below rented/washing/repair/etc. units
-        if requested_stock < unavailable_count:
-            return JsonResponse(
-                {
-                    "error": (
-                        f"Cannot reduce stock to {requested_stock}. "
-                        f"{unavailable_count} unit(s) are currently "
-                        f"not available."
-                    )
-                },
-                status=400
-            )
+            # Preserve old unit records and their history.
+            units.exclude(
+                status="retired"
+            ).update(status="retired")
 
-        # Increase stock
-        if requested_stock > current_stock:
+        # Find the next unique unit number.
+        existing_numbers = []
 
-            units_to_add = requested_stock - current_stock
+        for unit in PhysicalUnit.objects.filter(product=item):
+            try:
+                number = int(unit.unit_id.rsplit("-", 1)[1])
+                existing_numbers.append(number)
+            except (ValueError, IndexError):
+                pass
 
-            available_units = units.filter(
+        next_number = max(existing_numbers, default=0) + 1
+
+        # Add new available units.
+        for _ in range(quantity_to_add):
+            PhysicalUnit.objects.create(
+                product=item,
+                unit_id=(
+                    f"{item.code}-"
+                    f"{str(next_number).zfill(2)}"
+                ),
+                size="Free Size",
                 status="available"
             )
-
-            # Find the next unit number
-            existing_numbers = []
-
-            for unit in units:
-                try:
-                    number = int(
-                        unit.unit_id.rsplit("-", 1)[1]
-                    )
-                    existing_numbers.append(number)
-                except (ValueError, IndexError):
-                    pass
-
-            next_number = (
-                max(existing_numbers) + 1
-                if existing_numbers
-                else 1
-            )
-
-            for _ in range(units_to_add):
-                PhysicalUnit.objects.create(
-                    product=item,
-                    unit_id=(
-                        f"{item.code}-"
-                        f"{str(next_number).zfill(2)}"
-                    ),
-                    size="Free Size",
-                    status="available"
-                )
-
-                next_number += 1
-
-        # Reduce stock
-        elif requested_stock < current_stock:
-
-            units_to_remove = current_stock - requested_stock
-
-            removable_units = list(
-                units.filter(
-                    status="available"
-                ).order_by("-id")[:units_to_remove]
-            )
-
-            if len(removable_units) < units_to_remove:
-                return JsonResponse(
-                    {
-                        "error": (
-                            "Not enough available units "
-                            "to reduce stock."
-                        )
-                    },
-                    status=400
-                )
-
-            for unit in removable_units:
-                unit.delete()
+            next_number += 1
 
     item.save()
+
+    # Count only active stock (exclude retired units).
+    active_units = PhysicalUnit.objects.filter(
+        product=item
+    ).exclude(status="retired")
 
     return JsonResponse({
         "message": "Item updated successfully",
         "code": item.code,
-        "total_stock": item.total_stock,
-        "available_stock": item.available_stock,
+        "total_stock": active_units.count(),
+        "available_stock": active_units.filter(
+            status="available"
+        ).count(),
         "image_url": (
             item.image.url
             if item.image
@@ -811,7 +900,7 @@ def create_rental_order(request):
 def get_all_rental_orders(request):
     if request.method == "GET":
         today = date.today()
-        orders = RentalBooking.objects.select_related('customer').prefetch_related('items__product', 'items__product__category', 'items__unit', 'payments').all().order_by('-rental_date')
+        orders = RentalBooking.objects.select_related('customer').prefetch_related('items__product', 'items__product__category', 'items__unit', 'payments').all().order_by('-id')
 
         data = []
         for o in orders:

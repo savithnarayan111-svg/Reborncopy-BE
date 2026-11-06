@@ -68,18 +68,48 @@ class Product(models.Model):
     category = models.ForeignKey(Category, on_delete=models.CASCADE)
     colour = models.CharField(max_length=50, blank=True, default='')
     description = models.TextField(blank=True, default='')
-    cost_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, default=0.0)
-    product_type = models.CharField(max_length=50, blank=True, default='Supplement')
-    image = models.ImageField(upload_to='rental_items/', blank=True, null=True)
-    rental_price = models.DecimalField(max_digits=10, decimal_places=2)
-    code = models.CharField(max_length=20, unique=True, blank=True)
+    cost_price = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        default=0.0
+    )
+    product_type = models.CharField(
+        max_length=50,
+        blank=True,
+        default='Supplement'
+    )
+    image = models.ImageField(
+        upload_to='rental_items/',
+        blank=True,
+        null=True
+    )
+    rental_price = models.DecimalField(
+        max_digits=10,
+        decimal_places=2
+    )
+    code = models.CharField(
+        max_length=20,
+        unique=True,
+        blank=True
+    )
 
     def save(self, *args, **kwargs):
         if not self.code:
             prefix = self.category.prefix
-            last_item = Product.objects.filter(code__startswith=prefix).order_by('-code').first()
-            next_number = (int(last_item.code.replace(prefix, "")) + 1) if last_item else 1
+            last_item = (
+                Product.objects
+                .filter(code__startswith=prefix)
+                .order_by('-code')
+                .first()
+            )
+            next_number = (
+                int(last_item.code.replace(prefix, "")) + 1
+                if last_item else 1
+            )
             self.code = f"{prefix}{str(next_number).zfill(3)}"
+
         super().save(*args, **kwargs)
 
     def __str__(self):
@@ -87,11 +117,11 @@ class Product(models.Model):
 
     @property
     def total_stock(self):
-        return self.units.count()
+        return self.units.exclude(status="retired").count()
 
     @property
     def available_stock(self):
-        return self.units.filter(status='available').count()
+        return self.units.filter(status="available").count()
 
     @property
     def is_available(self):
