@@ -453,7 +453,6 @@ def update_rental_item(request, item_id):
             else None
         )
     })
-
 # DELETE
 @csrf_exempt
 def delete_rental_item(request, item_id):
